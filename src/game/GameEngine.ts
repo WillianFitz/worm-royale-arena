@@ -18,6 +18,7 @@ export class GameEngine {
   private canvasWidth: number;
   private canvasHeight: number;
   private remotePlayers: Map<string, RemotePlayerState> = new Map();
+  private remoteTargets: Map<string, { segments: { x: number; y: number }[]; angle: number }> = new Map();
   private localPlayerId: string = '';
   private multiplayerMode: boolean = false;
   private onPlayerDied: (() => void) | null = null;
@@ -78,35 +79,55 @@ export class GameEngine {
     for (const p of players) {
       if (p.id !== this.localPlayerId && p.alive) {
         this.remotePlayers.set(p.id, p);
+        // Store target positions for interpolation
+        const segments = p.segments.length > 0 ? p.segments : [{ x: p.x, y: p.y }];
+        this.remoteTargets.set(p.id, { segments, angle: p.angle });
       }
     }
     this.syncRemoteWormsToState();
   }
 
   private syncRemoteWormsToState() {
-    // Remove old remote worms
-    this.state.worms = this.state.worms.filter(w => w.isPlayer || !w.id.startsWith('remote_'));
+    // Track existing remote worm IDs
+    const existingRemoteIds = new Set<string>();
+    this.state.worms.forEach(w => {
+      if (w.id.startsWith('remote_')) existingRemoteIds.add(w.id);
+    });
 
-    // Add/update remote player worms
+    // Remove remote worms that are no longer in the remote players list
+    const activeRemoteIds = new Set(Array.from(this.remotePlayers.keys()).map(id => `remote_${id}`));
+    this.state.worms = this.state.worms.filter(w => !w.id.startsWith('remote_') || activeRemoteIds.has(w.id));
+
+    // Add new remote worms (don't replace existing ones - they'll interpolate)
     for (const [id, remote] of this.remotePlayers) {
-      // Interpolate segments if server sent every-other
-      const segments = remote.segments.length > 0 ? remote.segments : [{ x: remote.x, y: remote.y }];
+      const wormId = `remote_${id}`;
+      const existing = this.state.worms.find(w => w.id === wormId);
       
-      const remoteWorm: Worm = {
-        id: `remote_${id}`,
-        name: remote.name || 'Jogador',
-        segments,
-        color: remote.color || '#4ECDC4',
-        glowColor: remote.glowColor || '#4ECDC480',
-        angle: remote.angle,
-        speed: GAME_CONFIG.BASE_SPEED,
-        isBoosting: remote.isBoosting,
-        score: remote.score,
-        isPlayer: false,
-        targetAngle: remote.angle,
-        aiTimer: 0,
-      };
-      this.state.worms.push(remoteWorm);
+      if (!existing) {
+        const segments = remote.segments.length > 0 ? remote.segments : [{ x: remote.x, y: remote.y }];
+        const remoteWorm: Worm = {
+          id: wormId,
+          name: remote.name || 'Jogador',
+          segments,
+          color: remote.color || '#4ECDC4',
+          glowColor: remote.glowColor || '#4ECDC480',
+          angle: remote.angle,
+          speed: GAME_CONFIG.BASE_SPEED,
+          isBoosting: remote.isBoosting,
+          score: remote.score,
+          isPlayer: false,
+          targetAngle: remote.angle,
+          aiTimer: 0,
+        };
+        this.state.worms.push(remoteWorm);
+      } else {
+        // Update metadata but let interpolation handle positions
+        existing.isBoosting = remote.isBoosting;
+        existing.score = remote.score;
+        existing.color = remote.color || existing.color;
+        existing.glowColor = remote.glowColor || existing.glowColor;
+        existing.name = remote.name || existing.name;
+      }
     }
   }
 
@@ -250,8 +271,35 @@ export class GameEngine {
   private updateWorms(): void {
     this.state.worms.forEach(worm => {
       if (worm.segments.length === 0) return;
-      // Don't move remote worms locally - their positions come from server
-      if (worm.id.startsWith('remote_')) return;
+
+      // Interpolate remote worms toward their target positions
+      if (worm.id.startsWith('remote_')) {
+        const remoteId = worm.id.replace('remote_', '');
+        const target = this.remoteTargets.get(remoteId);
+        if (target && target.segments.length > 0) {
+          // Lerp angle
+          worm.angle = lerpAngle(worm.angle, target.angle, 0.15);
+          
+          // Lerp each segment toward target
+          const lerpFactor = 0.2;
+          for (let i = 0; i < worm.segments.length; i++) {
+            const targetSeg = target.segments[Math.min(i, target.segments.length - 1)];
+            worm.segments[i].x += (targetSeg.x - worm.segments[i].x) * lerpFactor;
+            worm.segments[i].y += (targetSeg.y - worm.segments[i].y) * lerpFactor;
+          }
+          
+          // Adjust segment count to match target
+          if (worm.segments.length < target.segments.length) {
+            const last = worm.segments[worm.segments.length - 1];
+            while (worm.segments.length < target.segments.length) {
+              worm.segments.push({ ...last });
+            }
+          } else if (worm.segments.length > target.segments.length + 5) {
+            worm.segments.length = target.segments.length;
+          }
+        }
+        return;
+      }
 
       worm.angle = lerpAngle(worm.angle, worm.targetAngle, 0.08);
       worm.angle = normalizeAngle(worm.angle);
@@ -267,11 +315,11 @@ export class GameEngine {
 
       for (let i = worm.segments.length - 1; i > 0; i--) {
         const current = worm.segments[i];
-        const target = worm.segments[i - 1];
-        const dist = getDistance(current, target);
+        const tgt = worm.segments[i - 1];
+        const dist = getDistance(current, tgt);
         
         if (dist > GAME_CONFIG.SEGMENT_DISTANCE) {
-          const angle = Math.atan2(target.y - current.y, target.x - current.x);
+          const angle = Math.atan2(tgt.y - current.y, tgt.x - current.x);
           current.x += Math.cos(angle) * (dist - GAME_CONFIG.SEGMENT_DISTANCE);
           current.y += Math.sin(angle) * (dist - GAME_CONFIG.SEGMENT_DISTANCE);
         }

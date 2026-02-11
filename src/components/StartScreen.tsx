@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import type { HallOfFameEntry } from './WormGame';
 
 interface StartScreenProps {
   onPlay: (name: string) => void;
+  hallOfFame: HallOfFameEntry[];
 }
 
-const StartScreen = ({ onPlay }: StartScreenProps) => {
+const StartScreen = ({ onPlay, hallOfFame }: StartScreenProps) => {
   const [name, setName] = useState(() => {
     return localStorage.getItem('worm_player_name') || '';
   });
@@ -52,6 +54,28 @@ const StartScreen = ({ onPlay }: StartScreenProps) => {
             <span>Clique para acelerar</span>
           </div>
         </div>
+
+        {/* Hall of Fame */}
+        {hallOfFame.length > 0 && (
+          <div className="hall-of-fame">
+            <h2 className="hall-of-fame__title">🏆 Hall da Fama</h2>
+            <div className="hall-of-fame__list">
+              {hallOfFame.map((entry, i) => (
+                <div key={i} className="hall-of-fame__entry">
+                  <span className="hall-of-fame__rank">
+                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
+                  </span>
+                  <span
+                    className="hall-of-fame__dot"
+                    style={{ background: entry.color }}
+                  />
+                  <span className="hall-of-fame__name">{entry.name}</span>
+                  <span className="hall-of-fame__score">{entry.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
