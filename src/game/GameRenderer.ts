@@ -28,7 +28,9 @@ export class GameRenderer {
     this.drawBoundary(state.camera);
     this.drawCandies(state.candies, state.camera);
     this.drawWorms(state.worms, state.camera);
+    this.drawNames(state.worms, state.camera);
     this.drawMinimap(state);
+    this.drawLeaderboard(state);
     this.drawUI(state);
   }
 
@@ -520,6 +522,97 @@ export class GameRenderer {
     this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(viewX, viewY, viewW, viewH);
+  }
+
+  private drawNames(worms: Worm[], camera: { x: number; y: number }) {
+    worms.forEach(worm => {
+      if (worm.segments.length === 0) return;
+      const head = worm.segments[0];
+      const screenX = head.x - camera.x;
+      const screenY = head.y - camera.y;
+      
+      if (screenX < -100 || screenX > this.width + 100 ||
+          screenY < -100 || screenY > this.height + 100) return;
+
+      const radius = getWormRadius(worm);
+      const nameY = screenY - radius - 15;
+      
+      // Name text
+      this.ctx.font = `bold 13px "Segoe UI", system-ui, sans-serif`;
+      this.ctx.textAlign = 'center';
+      this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      this.ctx.fillText(worm.name, screenX + 1, nameY + 1);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fillText(worm.name, screenX, nameY);
+      
+      // Length below name
+      this.ctx.font = `10px "Segoe UI", system-ui, sans-serif`;
+      this.ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      this.ctx.fillText(`${worm.segments.length}`, screenX, nameY + 13);
+    });
+  }
+
+  private drawLeaderboard(state: GameState) {
+    const sorted = [...state.worms]
+      .filter(w => w.segments.length > 0)
+      .sort((a, b) => b.segments.length - a.segments.length)
+      .slice(0, 10);
+
+    const lbWidth = 180;
+    const lbX = this.width - lbWidth - 15;
+    const lbY = 10;
+    const rowHeight = 24;
+    const headerHeight = 32;
+    const totalHeight = headerHeight + sorted.length * rowHeight + 8;
+
+    // Background
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    this.ctx.beginPath();
+    this.ctx.roundRect(lbX, lbY, lbWidth, totalHeight, 10);
+    this.ctx.fill();
+
+    // Title
+    this.ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+    this.ctx.fillStyle = '#ffd700';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('🏆 Ranking', lbX + lbWidth / 2, lbY + 22);
+
+    // Players
+    const player = state.worms.find(w => w.isPlayer);
+    sorted.forEach((worm, i) => {
+      const y = lbY + headerHeight + i * rowHeight + 16;
+      const isMe = worm.id === player?.id;
+
+      if (isMe) {
+        this.ctx.fillStyle = 'rgba(78, 205, 196, 0.15)';
+        this.ctx.fillRect(lbX + 4, y - 14, lbWidth - 8, rowHeight);
+      }
+
+      // Rank number
+      this.ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillStyle = i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : 'rgba(255,255,255,0.7)';
+      this.ctx.fillText(`${i + 1}.`, lbX + 10, y);
+
+      // Color dot
+      this.ctx.beginPath();
+      this.ctx.arc(lbX + 30, y - 4, 4, 0, Math.PI * 2);
+      this.ctx.fillStyle = worm.color;
+      this.ctx.fill();
+
+      // Name
+      this.ctx.font = `${isMe ? 'bold' : 'normal'} 12px "Segoe UI", system-ui, sans-serif`;
+      this.ctx.fillStyle = isMe ? '#4ECDC4' : '#ffffff';
+      this.ctx.textAlign = 'left';
+      const displayName = worm.name.length > 10 ? worm.name.slice(0, 10) + '…' : worm.name;
+      this.ctx.fillText(displayName, lbX + 40, y);
+
+      // Score
+      this.ctx.textAlign = 'right';
+      this.ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      this.ctx.font = '11px "Segoe UI", system-ui, sans-serif';
+      this.ctx.fillText(`${worm.segments.length}`, lbX + lbWidth - 10, y);
+    });
   }
 
   private drawUI(state: GameState) {

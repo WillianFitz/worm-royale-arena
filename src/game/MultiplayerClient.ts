@@ -103,7 +103,7 @@ export class MultiplayerClient {
   sendJoin(worm: Worm) {
     this.send({
       type: 'join',
-      name: 'Jogador',
+      name: worm.name,
       x: worm.segments[0]?.x || 0,
       y: worm.segments[0]?.y || 0,
       angle: worm.angle,

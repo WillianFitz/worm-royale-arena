@@ -22,9 +22,12 @@ export class GameEngine {
   private multiplayerMode: boolean = false;
   private onPlayerDied: (() => void) | null = null;
 
-  constructor(canvasWidth: number, canvasHeight: number) {
+  private playerName: string = 'Jogador';
+
+  constructor(canvasWidth: number, canvasHeight: number, playerName?: string) {
     this.canvasWidth = canvasWidth;
     this.canvasHeight = canvasHeight;
+    this.playerName = playerName || 'Jogador';
     this.state = this.initializeGame();
   }
 
@@ -32,7 +35,7 @@ export class GameEngine {
     const worms: Worm[] = [];
     
     // Create player worm first
-    worms.push(createWorm(true, 0));
+    worms.push(createWorm(true, 0, this.playerName));
     
     // Create AI worms (fewer in multiplayer mode)
     const botCount = this.multiplayerMode 
@@ -91,6 +94,7 @@ export class GameEngine {
       
       const remoteWorm: Worm = {
         id: `remote_${id}`,
+        name: remote.name || 'Jogador',
         segments,
         color: remote.color || '#4ECDC4',
         glowColor: remote.glowColor || '#4ECDC480',

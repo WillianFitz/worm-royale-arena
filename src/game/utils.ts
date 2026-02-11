@@ -24,7 +24,14 @@ export function lerpAngle(a: number, b: number, t: number): number {
   return a + diff * t;
 }
 
-export function createWorm(isPlayer: boolean, index: number): Worm {
+const AI_NAMES = [
+  'Cobra Rei', 'Serpentina', 'Viper', 'Anaconda', 'Python',
+  'Naja', 'Mamba', 'Cascavel', 'Jibóia', 'Sucuri',
+  'Coral', 'Dragão', 'Basilisco', 'Hydra', 'Ouroboros',
+  'Serpente', 'Jararaca', 'Titanoboa', 'Medusa', 'Apophis',
+];
+
+export function createWorm(isPlayer: boolean, index: number, playerName?: string): Worm {
   const colorIndex = index % WORM_COLORS.length;
   const startX = Math.random() * (GAME_CONFIG.MAP_SIZE - 400) + 200;
   const startY = Math.random() * (GAME_CONFIG.MAP_SIZE - 400) + 200;
@@ -40,6 +47,7 @@ export function createWorm(isPlayer: boolean, index: number): Worm {
 
   return {
     id: generateId(),
+    name: isPlayer ? (playerName || 'Jogador') : AI_NAMES[index % AI_NAMES.length],
     segments,
     color: WORM_COLORS[colorIndex].main,
     glowColor: WORM_COLORS[colorIndex].glow,
