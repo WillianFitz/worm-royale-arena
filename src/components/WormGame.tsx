@@ -6,15 +6,38 @@ import StartScreen from '@/components/StartScreen';
 
 const WORKER_URL = 'https://worm-royale-backend.willian-fitzbr.workers.dev';
 
+export interface HallOfFameEntry {
+  name: string;
+  score: number;
+  color: string;
+}
+
+function loadHallOfFame(): HallOfFameEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem('worm_hall_of_fame') || '[]');
+  } catch { return []; }
+}
+
+function saveToHallOfFame(entry: HallOfFameEntry) {
+  const hall = loadHallOfFame();
+  hall.push(entry);
+  hall.sort((a, b) => b.score - a.score);
+  const top10 = hall.slice(0, 10);
+  localStorage.setItem('worm_hall_of_fame', JSON.stringify(top10));
+  return top10;
+}
+
 const WormGame = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameEngineRef = useRef<GameEngine | null>(null);
   const gameRendererRef = useRef<GameRenderer | null>(null);
   const multiplayerRef = useRef<MultiplayerClient | null>(null);
   const animationFrameRef = useRef<number>(0);
+  const cleanupRef = useRef<(() => void) | null>(null);
   const [gameStarted, setGameStarted] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [playerCount, setPlayerCount] = useState(0);
+  const [hallOfFame, setHallOfFame] = useState<HallOfFameEntry[]>(loadHallOfFame());
 
   const handleResize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -32,9 +55,15 @@ const WormGame = () => {
   const handleMouseDown = useCallback((e: MouseEvent) => {
     if (e.button === 0) {
       if (gameEngineRef.current?.isGameOver()) {
-        gameEngineRef.current.reset();
+        // Save score to hall of fame
         const player = gameEngineRef.current.getPlayerWorm();
-        if (player) multiplayerRef.current?.sendRespawn(player);
+        if (player) {
+          const updated = saveToHallOfFame({ name: player.name, score: player.segments.length, color: player.color });
+          setHallOfFame(updated);
+        }
+        gameEngineRef.current.reset();
+        const newPlayer = gameEngineRef.current.getPlayerWorm();
+        if (newPlayer) multiplayerRef.current?.sendRespawn(newPlayer);
       } else {
         gameEngineRef.current?.setMouseDown(true);
       }
@@ -54,9 +83,14 @@ const WormGame = () => {
   const handleTouchStart = useCallback((e: TouchEvent) => {
     e.preventDefault();
     if (gameEngineRef.current?.isGameOver()) {
-      gameEngineRef.current.reset();
       const player = gameEngineRef.current.getPlayerWorm();
-      if (player) multiplayerRef.current?.sendRespawn(player);
+      if (player) {
+        const updated = saveToHallOfFame({ name: player.name, score: player.segments.length, color: player.color });
+        setHallOfFame(updated);
+      }
+      gameEngineRef.current.reset();
+      const newPlayer = gameEngineRef.current.getPlayerWorm();
+      if (newPlayer) multiplayerRef.current?.sendRespawn(newPlayer);
     } else {
       const touch = e.touches[0];
       gameEngineRef.current?.setMousePosition(touch.clientX, touch.clientY);
@@ -66,6 +100,26 @@ const WormGame = () => {
 
   const handleTouchEnd = useCallback(() => {
     gameEngineRef.current?.setMouseDown(false);
+  }, []);
+
+  const stopGame = useCallback(() => {
+    // Save current score before exiting
+    const player = gameEngineRef.current?.getPlayerWorm();
+    if (player && player.segments.length > 10) {
+      const updated = saveToHallOfFame({ name: player.name, score: player.segments.length, color: player.color });
+      setHallOfFame(updated);
+    }
+    
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+    cancelAnimationFrame(animationFrameRef.current);
+    multiplayerRef.current?.disconnect();
+    multiplayerRef.current = null;
+    gameEngineRef.current = null;
+    gameRendererRef.current = null;
+    setGameStarted(false);
+    setConnectionStatus('connecting');
+    setPlayerCount(0);
   }, []);
 
   const startGame = useCallback((playerName: string) => {
@@ -95,6 +149,17 @@ const WormGame = () => {
       onGameState: (players) => {
         engine.updateRemotePlayers(players);
         setPlayerCount(players.filter(p => p.alive).length + 1);
+        // Track high scores from online players
+        players.forEach(p => {
+          if (p.alive && p.segments.length > 30) {
+            const existing = loadHallOfFame();
+            const alreadyTracked = existing.some(e => e.name === p.name && e.score >= p.segments.length);
+            if (!alreadyTracked && p.segments.length > (existing[existing.length - 1]?.score || 0)) {
+              const updated = saveToHallOfFame({ name: p.name, score: p.segments.length, color: p.color });
+              setHallOfFame(updated);
+            }
+          }
+        });
       },
       onPlayerDied: () => {},
       onConnected: () => setConnectionStatus('connected'),
@@ -108,6 +173,8 @@ const WormGame = () => {
     multiplayerRef.current = mp;
     mp.connect();
 
+    const contextMenuHandler = (e: Event) => e.preventDefault();
+
     window.addEventListener('resize', handleResize);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mousedown', handleMouseDown);
@@ -115,7 +182,18 @@ const WormGame = () => {
     canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
     canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
     canvas.addEventListener('touchend', handleTouchEnd);
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('contextmenu', contextMenuHandler);
+
+    cleanupRef.current = () => {
+      window.removeEventListener('resize', handleResize);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+      canvas.removeEventListener('contextmenu', contextMenuHandler);
+    };
 
     const gameLoop = () => {
       engine.update();
@@ -132,6 +210,7 @@ const WormGame = () => {
 
   useEffect(() => {
     return () => {
+      cleanupRef.current?.();
       cancelAnimationFrame(animationFrameRef.current);
       multiplayerRef.current?.disconnect();
     };
@@ -141,7 +220,7 @@ const WormGame = () => {
     return (
       <div className="game-container">
         <canvas ref={canvasRef} className="game-canvas" style={{ display: 'none' }} />
-        <StartScreen onPlay={startGame} />
+        <StartScreen onPlay={startGame} hallOfFame={hallOfFame} />
       </div>
     );
   }
@@ -149,6 +228,15 @@ const WormGame = () => {
   return (
     <div className="game-container">
       <canvas ref={canvasRef} className="game-canvas" />
+      {/* Exit button */}
+      <button
+        onClick={stopGame}
+        className="game-exit-button"
+        title="Sair para o lobby"
+      >
+        ✕
+      </button>
+      {/* Connection status */}
       <div style={{
         position: 'fixed', top: 10, left: 10,
         display: 'flex', alignItems: 'center', gap: 8,
