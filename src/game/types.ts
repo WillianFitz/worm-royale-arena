@@ -10,6 +10,7 @@ export interface WormSegment {
 
 export interface Worm {
   id: string;
+  name: string;
   segments: WormSegment[];
   color: string;
   glowColor: string;

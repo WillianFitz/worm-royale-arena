@@ -129,6 +129,84 @@
   .loading-screen p {
     @apply mt-4 text-lg font-medium text-foreground;
   }
+
+  /* Start Screen */
+  .start-screen {
+    @apply absolute inset-0 flex items-center justify-center;
+    background: radial-gradient(ellipse at center, hsl(240 15% 8%) 0%, hsl(240 15% 3%) 100%);
+    z-index: 200;
+  }
+
+  .start-screen__content {
+    @apply flex flex-col items-center gap-5 p-10 rounded-2xl;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    min-width: 320px;
+  }
+
+  .start-screen__title {
+    @apply text-5xl font-bold;
+    color: hsl(var(--primary));
+    text-shadow: 0 0 40px hsl(var(--primary) / 0.4);
+  }
+
+  .start-screen__subtitle {
+    @apply text-base;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .start-screen__input-group {
+    @apply w-full;
+  }
+
+  .start-screen__input {
+    @apply w-full px-4 py-3 rounded-xl text-center text-lg font-medium outline-none;
+    background: rgba(255, 255, 255, 0.06);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    color: hsl(var(--foreground));
+    transition: border-color 0.2s;
+  }
+
+  .start-screen__input:focus {
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.2);
+  }
+
+  .start-screen__input::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
+
+  .start-screen__button {
+    @apply w-full py-3 rounded-xl text-xl font-bold cursor-pointer;
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(160 84% 45%));
+    color: hsl(var(--primary-foreground));
+    border: none;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 4px 20px hsl(var(--primary) / 0.3);
+  }
+
+  .start-screen__button:hover {
+    transform: scale(1.03);
+    box-shadow: 0 6px 30px hsl(var(--primary) / 0.5);
+  }
+
+  .start-screen__button:active {
+    transform: scale(0.98);
+  }
+
+  .start-screen__controls {
+    @apply flex gap-6 mt-2;
+  }
+
+  .start-screen__control {
+    @apply flex items-center gap-2 text-sm;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .start-screen__key {
+    @apply text-lg;
+  }
 }
 
 @keyframes spin {
