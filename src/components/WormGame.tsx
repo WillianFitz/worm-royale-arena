@@ -113,8 +113,14 @@ const WormGame = () => {
     cleanupRef.current?.();
     cleanupRef.current = null;
     cancelAnimationFrame(animationFrameRef.current);
-    multiplayerRef.current?.disconnect();
-    multiplayerRef.current = null;
+    // Send died notification so other players see us leave
+    multiplayerRef.current?.sendDied();
+    // Small delay to let the message send before closing
+    setTimeout(() => {
+      multiplayerRef.current?.disconnect();
+      multiplayerRef.current = null;
+    }, 100);
+
     gameEngineRef.current = null;
     gameRendererRef.current = null;
     setGameStarted(false);
@@ -147,11 +153,13 @@ const WormGame = () => {
       onPlayerJoined: () => setPlayerCount(prev => prev + 1),
       onPlayerLeft: () => setPlayerCount(prev => Math.max(1, prev - 1)),
       onGameState: (players) => {
-        engine.updateRemotePlayers(players);
-        setPlayerCount(players.filter(p => p.alive).length + 1);
+        // Only count alive players for player count
+        const alivePlayers = players.filter(p => p.alive);
+        engine.updateRemotePlayers(alivePlayers);
+        setPlayerCount(alivePlayers.length + 1);
         // Track high scores from online players
-        players.forEach(p => {
-          if (p.alive && p.segments.length > 30) {
+        alivePlayers.forEach(p => {
+          if (p.segments.length > 30) {
             const existing = loadHallOfFame();
             const alreadyTracked = existing.some(e => e.name === p.name && e.score >= p.segments.length);
             if (!alreadyTracked && p.segments.length > (existing[existing.length - 1]?.score || 0)) {

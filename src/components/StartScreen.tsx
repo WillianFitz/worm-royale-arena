@@ -10,6 +10,7 @@ const StartScreen = ({ onPlay, hallOfFame }: StartScreenProps) => {
   const [name, setName] = useState(() => {
     return localStorage.getItem('worm_player_name') || '';
   });
+  const [showHall, setShowHall] = useState(false);
 
   const handlePlay = () => {
     const playerName = name.trim() || 'Jogador';
@@ -55,25 +56,39 @@ const StartScreen = ({ onPlay, hallOfFame }: StartScreenProps) => {
           </div>
         </div>
 
-        {/* Hall of Fame */}
-        {hallOfFame.length > 0 && (
+        {/* Hall of Fame Toggle Button - always visible */}
+        <button
+          onClick={() => setShowHall(!showHall)}
+          className="hall-of-fame__toggle"
+        >
+          🏆 {showHall ? 'Fechar' : 'Sensações do Momento'}
+        </button>
+
+        {/* Hall of Fame Panel */}
+        {showHall && (
           <div className="hall-of-fame">
             <h2 className="hall-of-fame__title">🏆 Hall da Fama</h2>
-            <div className="hall-of-fame__list">
-              {hallOfFame.map((entry, i) => (
-                <div key={i} className="hall-of-fame__entry">
-                  <span className="hall-of-fame__rank">
-                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
-                  </span>
-                  <span
-                    className="hall-of-fame__dot"
-                    style={{ background: entry.color }}
-                  />
-                  <span className="hall-of-fame__name">{entry.name}</span>
-                  <span className="hall-of-fame__score">{entry.score}</span>
-                </div>
-              ))}
-            </div>
+            {hallOfFame.length > 0 ? (
+              <div className="hall-of-fame__list">
+                {hallOfFame.map((entry, i) => (
+                  <div key={i} className="hall-of-fame__entry">
+                    <span className="hall-of-fame__rank">
+                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
+                    </span>
+                    <span
+                      className="hall-of-fame__dot"
+                      style={{ background: entry.color }}
+                    />
+                    <span className="hall-of-fame__name">{entry.name}</span>
+                    <span className="hall-of-fame__score">{entry.score} pts</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="hall-of-fame__empty">
+                Nenhum recorde ainda. Seja o primeiro! 🎯
+              </p>
+            )}
           </div>
         )}
       </div>
