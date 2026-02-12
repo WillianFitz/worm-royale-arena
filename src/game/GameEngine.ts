@@ -1,13 +1,16 @@
-import { GameState, Worm, Candy, Vector2D } from './types';
-import { GAME_CONFIG } from './constants';
+import { GameState, Worm, Candy, Vector2D, MapZone } from './types';
+import { GAME_CONFIG, ABILITY_CONFIG, ZONE_CONFIG } from './constants';
 import {
   createWorm,
   createCandy,
+  createMapZones,
+  createDefaultAbilities,
   checkCandyCollision,
   checkWormCollision,
   lerpAngle,
   normalizeAngle,
   getDistance,
+  getWormRadius,
 } from './utils';
 import { RemotePlayerState } from './MultiplayerClient';
 
@@ -22,8 +25,8 @@ export class GameEngine {
   private localPlayerId: string = '';
   private multiplayerMode: boolean = false;
   private onPlayerDied: (() => void) | null = null;
-
   private playerName: string = 'Jogador';
+  private portalCooldowns: Map<string, number> = new Map();
 
   constructor(canvasWidth: number, canvasHeight: number, playerName?: string) {
     this.canvasWidth = canvasWidth;
@@ -34,27 +37,23 @@ export class GameEngine {
 
   private initializeGame(): GameState {
     const worms: Worm[] = [];
-    
-    // Create player worm first
     worms.push(createWorm(true, 0, this.playerName));
-    
-    // Create AI worms (fewer in multiplayer mode)
-    const botCount = this.multiplayerMode 
+
+    const botCount = this.multiplayerMode
       ? Math.max(5, GAME_CONFIG.WORM_COUNT - this.remotePlayers.size)
       : GAME_CONFIG.WORM_COUNT - 1;
-    
+
     for (let i = 1; i <= botCount; i++) {
       worms.push(createWorm(false, i));
     }
 
-    // Create candies
     const candies: Candy[] = [];
     for (let i = 0; i < GAME_CONFIG.CANDY_COUNT; i++) {
       candies.push(createCandy());
     }
 
     const player = worms[0];
-    
+
     return {
       worms,
       candies,
@@ -65,6 +64,7 @@ export class GameEngine {
       mapSize: GAME_CONFIG.MAP_SIZE,
       gameOver: false,
       playerRank: GAME_CONFIG.WORM_COUNT,
+      mapZones: createMapZones(),
     };
   }
 
@@ -79,7 +79,6 @@ export class GameEngine {
     for (const p of players) {
       if (p.id !== this.localPlayerId && p.alive) {
         this.remotePlayers.set(p.id, p);
-        // Store target positions for interpolation
         const segments = p.segments.length > 0 ? p.segments : [{ x: p.x, y: p.y }];
         this.remoteTargets.set(p.id, { segments, angle: p.angle });
       }
@@ -88,21 +87,13 @@ export class GameEngine {
   }
 
   private syncRemoteWormsToState() {
-    // Track existing remote worm IDs
-    const existingRemoteIds = new Set<string>();
-    this.state.worms.forEach(w => {
-      if (w.id.startsWith('remote_')) existingRemoteIds.add(w.id);
-    });
-
-    // Remove remote worms that are no longer in the remote players list
     const activeRemoteIds = new Set(Array.from(this.remotePlayers.keys()).map(id => `remote_${id}`));
     this.state.worms = this.state.worms.filter(w => !w.id.startsWith('remote_') || activeRemoteIds.has(w.id));
 
-    // Add new remote worms (don't replace existing ones - they'll interpolate)
     for (const [id, remote] of this.remotePlayers) {
       const wormId = `remote_${id}`;
       const existing = this.state.worms.find(w => w.id === wormId);
-      
+
       if (!existing) {
         const segments = remote.segments.length > 0 ? remote.segments : [{ x: remote.x, y: remote.y }];
         const remoteWorm: Worm = {
@@ -118,10 +109,16 @@ export class GameEngine {
           isPlayer: false,
           targetAngle: remote.angle,
           aiTimer: 0,
+          abilities: [],
+          isInvisible: false,
+          isGhost: false,
+          hasShield: false,
+          speedMultiplier: 1,
+          buffTimer: 0,
+          buffType: null,
         };
         this.state.worms.push(remoteWorm);
       } else {
-        // Update metadata but let interpolation handle positions
         existing.isBoosting = remote.isBoosting;
         existing.score = remote.score;
         existing.color = remote.color || existing.color;
@@ -152,6 +149,16 @@ export class GameEngine {
     this.isMouseDown = isDown;
   }
 
+  activateAbility(index: number) {
+    const player = this.state.worms.find(w => w.isPlayer);
+    if (!player || index < 0 || index >= player.abilities.length) return;
+    const ability = player.abilities[index];
+    if (ability.cooldown > 0 || ability.active) return;
+    ability.active = true;
+    ability.duration = ability.maxDuration;
+    ability.cooldown = ability.maxCooldown;
+  }
+
   getState(): GameState {
     return this.state;
   }
@@ -163,13 +170,154 @@ export class GameEngine {
   update(): void {
     if (this.state.gameOver) return;
 
+    this.updateAbilities();
     this.updatePlayer();
     this.updateAI();
     this.updateWorms();
+    this.updateMapZones();
     this.checkCollisions();
     this.updateCamera();
     this.spawnCandies();
     this.updateRanking();
+  }
+
+  private updateAbilities(): void {
+    this.state.worms.forEach(worm => {
+      if (worm.abilities.length === 0) return;
+
+      worm.isInvisible = false;
+      worm.isGhost = false;
+      worm.hasShield = false;
+      let dashActive = false;
+
+      worm.abilities.forEach(ability => {
+        if (ability.cooldown > 0 && !ability.active) {
+          ability.cooldown--;
+        }
+
+        if (ability.active) {
+          ability.duration--;
+          if (ability.duration <= 0) {
+            ability.active = false;
+          } else {
+            switch (ability.type) {
+              case 'dash':
+                dashActive = true;
+                break;
+              case 'invisible':
+                worm.isInvisible = true;
+                break;
+              case 'ghost':
+                worm.isGhost = true;
+                break;
+              case 'shield':
+                worm.hasShield = true;
+                break;
+            }
+          }
+        }
+      });
+
+      if (dashActive) {
+        worm.speedMultiplier = ABILITY_CONFIG.dash.speedMultiplier;
+      } else if (worm.buffType !== 'speed') {
+        worm.speedMultiplier = 1;
+      }
+    });
+  }
+
+  private updateMapZones(): void {
+    // Decrease portal cooldowns
+    for (const [id, cd] of this.portalCooldowns) {
+      if (cd <= 0) this.portalCooldowns.delete(id);
+      else this.portalCooldowns.set(id, cd - 1);
+    }
+
+    this.state.worms.forEach(worm => {
+      if (worm.segments.length === 0) return;
+      const head = worm.segments[0];
+
+      // Reset buff if timer expired
+      if (worm.buffTimer > 0) {
+        worm.buffTimer--;
+        if (worm.buffTimer <= 0) {
+          worm.buffType = null;
+          if (!worm.abilities.some(a => a.type === 'dash' && a.active)) {
+            worm.speedMultiplier = 1;
+          }
+        }
+      }
+
+      this.state.mapZones.forEach(zone => {
+        const dist = getDistance(head, zone);
+        if (dist > zone.radius) return;
+
+        switch (zone.type) {
+          case 'speed':
+            worm.buffType = 'speed';
+            worm.buffTimer = 30;
+            if (!worm.abilities.some(a => a.type === 'dash' && a.active)) {
+              worm.speedMultiplier = ZONE_CONFIG.speed.speedMultiplier;
+            }
+            break;
+
+          case 'mass':
+            if (Math.random() < 0.02 && worm.segments.length < GAME_CONFIG.MAX_SEGMENTS) {
+              const tail = worm.segments[worm.segments.length - 1];
+              worm.segments.push({ ...tail });
+              worm.segments.push({ ...tail });
+            }
+            break;
+
+          case 'blackhole': {
+            const angle = Math.atan2(zone.y - head.y, zone.x - head.x);
+            const force = ZONE_CONFIG.blackhole.pullForce * (1 - dist / zone.radius);
+            head.x += Math.cos(angle) * force;
+            head.y += Math.sin(angle) * force;
+            break;
+          }
+
+          case 'toxic':
+            if (Math.random() < ZONE_CONFIG.toxic.shrinkRate && worm.segments.length > GAME_CONFIG.INITIAL_SEGMENTS) {
+              worm.segments.pop();
+            }
+            break;
+
+          case 'portal': {
+            if (dist < zone.radius * 0.5 && zone.linkedPortalId) {
+              // Check cooldown
+              if (this.portalCooldowns.has(zone.id)) break;
+              const linked = this.state.mapZones.find(z => z.id === zone.linkedPortalId);
+              if (linked) {
+                const offsetX = head.x - zone.x;
+                const offsetY = head.y - zone.y;
+                head.x = linked.x + offsetX;
+                head.y = linked.y + offsetY;
+                // Set cooldown on both portals
+                this.portalCooldowns.set(zone.id, 120);
+                this.portalCooldowns.set(linked.id, 120);
+              }
+            }
+            break;
+          }
+        }
+      });
+
+      // Shield repel effect
+      if (worm.hasShield) {
+        this.state.worms.forEach(other => {
+          if (other.id === worm.id || other.segments.length === 0) return;
+          const otherHead = other.segments[0];
+          const dist = getDistance(head, otherHead);
+          if (dist < ABILITY_CONFIG.shield.repelRadius) {
+            const angle = Math.atan2(otherHead.y - head.y, otherHead.x - head.x);
+            const force = ABILITY_CONFIG.shield.repelForce * (1 - dist / ABILITY_CONFIG.shield.repelRadius);
+            otherHead.x += Math.cos(angle) * force;
+            otherHead.y += Math.sin(angle) * force;
+          }
+        });
+      }
+    });
   }
 
   private updatePlayer(): void {
@@ -185,45 +333,40 @@ export class GameEngine {
     player.targetAngle = Math.atan2(dy, dx);
 
     player.isBoosting = this.isMouseDown && player.segments.length > GAME_CONFIG.INITIAL_SEGMENTS;
-    
+
     if (player.isBoosting) {
-      player.speed = GAME_CONFIG.BOOST_SPEED;
+      player.speed = GAME_CONFIG.BOOST_SPEED * player.speedMultiplier;
       if (Math.random() < 0.05 && player.segments.length > GAME_CONFIG.INITIAL_SEGMENTS) {
         const lastSegment = player.segments.pop();
         if (lastSegment) {
           this.state.candies.push({
             id: Math.random().toString(36).substr(2, 9),
-            x: lastSegment.x,
-            y: lastSegment.y,
-            color: player.color,
-            size: 5,
-            value: 1,
+            x: lastSegment.x, y: lastSegment.y,
+            color: player.color, size: 5, value: 1,
           });
         }
       }
     } else {
-      player.speed = GAME_CONFIG.BASE_SPEED;
+      player.speed = GAME_CONFIG.BASE_SPEED * player.speedMultiplier;
     }
   }
 
   private updateAI(): void {
     this.state.worms.forEach(worm => {
-      // Skip player and remote worms (they're controlled externally)
       if (worm.isPlayer || worm.segments.length === 0 || worm.id.startsWith('remote_')) return;
 
       worm.aiTimer++;
-
       const head = worm.segments[0];
       const nearBoundary = head.x < 200 || head.x > GAME_CONFIG.MAP_SIZE - 200 ||
                           head.y < 200 || head.y > GAME_CONFIG.MAP_SIZE - 200;
 
       if (worm.aiTimer >= GAME_CONFIG.AI_DIRECTION_CHANGE_INTERVAL || nearBoundary) {
         worm.aiTimer = 0;
-        
+
         if (nearBoundary) {
-          const centerX = GAME_CONFIG.MAP_SIZE / 2;
-          const centerY = GAME_CONFIG.MAP_SIZE / 2;
-          worm.targetAngle = Math.atan2(centerY - head.y, centerX - head.x);
+          const cx = GAME_CONFIG.MAP_SIZE / 2;
+          const cy = GAME_CONFIG.MAP_SIZE / 2;
+          worm.targetAngle = Math.atan2(cy - head.y, cx - head.x);
         } else {
           const nearbyCandy = this.findNearestCandy(head);
           if (nearbyCandy && Math.random() > 0.3) {
@@ -235,18 +378,15 @@ export class GameEngine {
       }
 
       worm.isBoosting = Math.random() < 0.01 && worm.segments.length > GAME_CONFIG.INITIAL_SEGMENTS + 5;
-      worm.speed = worm.isBoosting ? GAME_CONFIG.BOOST_SPEED : GAME_CONFIG.BASE_SPEED;
+      worm.speed = (worm.isBoosting ? GAME_CONFIG.BOOST_SPEED : GAME_CONFIG.BASE_SPEED) * worm.speedMultiplier;
 
       if (worm.isBoosting && Math.random() < 0.1) {
         const lastSegment = worm.segments.pop();
         if (lastSegment) {
           this.state.candies.push({
             id: Math.random().toString(36).substr(2, 9),
-            x: lastSegment.x,
-            y: lastSegment.y,
-            color: worm.color,
-            size: 4,
-            value: 1,
+            x: lastSegment.x, y: lastSegment.y,
+            color: worm.color, size: 4, value: 1,
           });
         }
       }
@@ -256,15 +396,10 @@ export class GameEngine {
   private findNearestCandy(position: Vector2D): Candy | null {
     let nearest: Candy | null = null;
     let minDist = 300;
-
     for (const candy of this.state.candies) {
       const dist = getDistance(position, candy);
-      if (dist < minDist) {
-        minDist = dist;
-        nearest = candy;
-      }
+      if (dist < minDist) { minDist = dist; nearest = candy; }
     }
-
     return nearest;
   }
 
@@ -272,28 +407,20 @@ export class GameEngine {
     this.state.worms.forEach(worm => {
       if (worm.segments.length === 0) return;
 
-      // Interpolate remote worms toward their target positions
       if (worm.id.startsWith('remote_')) {
         const remoteId = worm.id.replace('remote_', '');
         const target = this.remoteTargets.get(remoteId);
         if (target && target.segments.length > 0) {
-          // Lerp angle
           worm.angle = lerpAngle(worm.angle, target.angle, 0.15);
-          
-          // Lerp each segment toward target
           const lerpFactor = 0.2;
           for (let i = 0; i < worm.segments.length; i++) {
             const targetSeg = target.segments[Math.min(i, target.segments.length - 1)];
             worm.segments[i].x += (targetSeg.x - worm.segments[i].x) * lerpFactor;
             worm.segments[i].y += (targetSeg.y - worm.segments[i].y) * lerpFactor;
           }
-          
-          // Adjust segment count to match target
           if (worm.segments.length < target.segments.length) {
             const last = worm.segments[worm.segments.length - 1];
-            while (worm.segments.length < target.segments.length) {
-              worm.segments.push({ ...last });
-            }
+            while (worm.segments.length < target.segments.length) worm.segments.push({ ...last });
           } else if (worm.segments.length > target.segments.length + 5) {
             worm.segments.length = target.segments.length;
           }
@@ -317,7 +444,6 @@ export class GameEngine {
         const current = worm.segments[i];
         const tgt = worm.segments[i - 1];
         const dist = getDistance(current, tgt);
-        
         if (dist > GAME_CONFIG.SEGMENT_DISTANCE) {
           const angle = Math.atan2(tgt.y - current.y, tgt.x - current.x);
           current.x += Math.cos(angle) * (dist - GAME_CONFIG.SEGMENT_DISTANCE);
@@ -332,18 +458,13 @@ export class GameEngine {
   private checkCollisions(): void {
     this.state.worms.forEach(worm => {
       if (worm.segments.length === 0) return;
-
       this.state.candies = this.state.candies.filter(candy => {
         if (checkCandyCollision(worm, candy)) {
           worm.score += candy.value;
-          
           if (worm.segments.length < GAME_CONFIG.MAX_SEGMENTS) {
             const tail = worm.segments[worm.segments.length - 1];
-            for (let i = 0; i < candy.value; i++) {
-              worm.segments.push({ ...tail });
-            }
+            for (let i = 0; i < candy.value; i++) worm.segments.push({ ...tail });
           }
-          
           return false;
         }
         return true;
@@ -360,24 +481,24 @@ export class GameEngine {
         if (other.segments.length === 0) continue;
 
         if (checkWormCollision(worm, other)) {
+          // Shield protects from death
+          if (worm.hasShield) continue;
+
           worm.segments.forEach((seg, idx) => {
             if (idx % 2 === 0) {
               this.state.candies.push({
                 id: Math.random().toString(36).substr(2, 9),
                 x: seg.x + (Math.random() - 0.5) * 20,
                 y: seg.y + (Math.random() - 0.5) * 20,
-                color: worm.color,
-                size: 6,
-                value: 2,
+                color: worm.color, size: 6, value: 2,
               });
             }
           });
-          
+
           if (worm.isPlayer) {
             this.state.gameOver = true;
             this.onPlayerDied?.();
           } else if (!worm.id.startsWith('remote_')) {
-            // Respawn only local AI bots
             const newWorm = createWorm(false, i);
             this.state.worms[i] = newWorm;
           }
@@ -409,7 +530,7 @@ export class GameEngine {
     const sorted = [...this.state.worms]
       .filter(w => w.segments.length > 0)
       .sort((a, b) => b.segments.length - a.segments.length);
-    
+
     const player = this.state.worms.find(w => w.isPlayer);
     if (player) {
       this.state.playerRank = sorted.findIndex(w => w.id === player.id) + 1;

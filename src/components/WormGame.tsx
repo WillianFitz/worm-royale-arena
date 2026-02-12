@@ -102,6 +102,13 @@ const WormGame = () => {
     gameEngineRef.current?.setMouseDown(false);
   }, []);
 
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    const key = e.key;
+    if (key >= '1' && key <= '4') {
+      gameEngineRef.current?.activateAbility(parseInt(key) - 1);
+    }
+  }, []);
+
   const stopGame = useCallback(() => {
     // Save current score before exiting
     const player = gameEngineRef.current?.getPlayerWorm();
@@ -184,6 +191,7 @@ const WormGame = () => {
     const contextMenuHandler = (e: Event) => e.preventDefault();
 
     window.addEventListener('resize', handleResize);
+    window.addEventListener('keydown', handleKeyDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mouseup', handleMouseUp);
@@ -194,6 +202,7 @@ const WormGame = () => {
 
     cleanupRef.current = () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('keydown', handleKeyDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mouseup', handleMouseUp);
@@ -214,7 +223,7 @@ const WormGame = () => {
 
     gameLoop();
     setGameStarted(true);
-  }, [handleResize, handleMouseMove, handleMouseDown, handleMouseUp, handleTouchMove, handleTouchStart, handleTouchEnd]);
+  }, [handleResize, handleMouseMove, handleMouseDown, handleMouseUp, handleTouchMove, handleTouchStart, handleTouchEnd, handleKeyDown]);
 
   useEffect(() => {
     return () => {
