@@ -60,7 +60,9 @@ export class MultiplayerClient {
 
     this.ws.onclose = () => {
       this.callbacks.onDisconnected();
-      this.tryReconnect(room);
+      if (this.maxReconnectAttempts > 0) {
+        this.tryReconnect(room);
+      }
     };
 
     this.ws.onerror = () => {
@@ -150,6 +152,10 @@ export class MultiplayerClient {
 
   disconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    // Notify server before closing
+    this.send({ type: 'leave' });
+    this.maxReconnectAttempts = 0; // Prevent auto-reconnect after intentional disconnect
     this.ws?.close();
     this.ws = null;
   }

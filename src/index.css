@@ -271,6 +271,25 @@
     @apply flex-shrink-0 font-bold;
     color: hsl(var(--muted-foreground));
   }
+
+  .hall-of-fame__toggle {
+    @apply w-full mt-4 py-2.5 px-4 rounded-xl font-bold text-sm cursor-pointer;
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.15), rgba(255, 152, 0, 0.15));
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    color: hsl(var(--accent));
+    transition: all 0.2s ease;
+  }
+
+  .hall-of-fame__toggle:hover {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.25), rgba(255, 152, 0, 0.25));
+    border-color: rgba(255, 193, 7, 0.5);
+    transform: scale(1.02);
+  }
+
+  .hall-of-fame__empty {
+    @apply text-center text-sm py-4;
+    color: hsl(var(--muted-foreground));
+  }
 }
 
 @keyframes spin {
